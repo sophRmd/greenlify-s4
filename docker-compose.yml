@@ -1,0 +1,26 @@
+services:
+  greenlify:
+    build: .
+    container_name: greenlify
+    ports:
+      - "${PORT:-8080}:${PORT:-8080}"
+    environment:
+      SERVER_PORT: "${PORT:-8080}"
+
+      SPRING_DATASOURCE_URL: "${ORACLE_URL:?Defina ORACLE_URL no .env}"
+      SPRING_DATASOURCE_USERNAME: "${ORACLE_USER:?Defina ORACLE_USER no .env}"
+      SPRING_DATASOURCE_PASSWORD: "${ORACLE_PASSWORD:?Defina ORACLE_PASSWORD no .env}"
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: "oracle.jdbc.OracleDriver"
+
+
+      # Redis do ranking all time (se cair, o ranking usa o Oracle)
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: greenlify-redis
+    restart: unless-stopped
