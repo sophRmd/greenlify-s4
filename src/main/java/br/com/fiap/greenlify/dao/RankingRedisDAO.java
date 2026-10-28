@@ -160,9 +160,9 @@ public class RankingRedisDAO {
                     boolean ssl = "true".equalsIgnoreCase(System.getenv().getOrDefault("REDIS_SSL", "false").trim());
                     LettuceClientConfiguration cliente = ssl
                             ? LettuceClientConfiguration.builder()
-                            .commandTimeout(Duration.ofSeconds(2)).useSsl().and().build()
+                              .commandTimeout(Duration.ofSeconds(10)).useSsl().and().build()
                             : LettuceClientConfiguration.builder()
-                            .commandTimeout(Duration.ofSeconds(2)).build();
+                              .commandTimeout(Duration.ofSeconds(10)).build();
                     System.out.println("Redis: conectando em " + servidor.getHostName() + ":" + servidor.getPort()
                             + " (usuário informado: " + !usuario.isEmpty() + ", senha informada: " + !senha.isEmpty()
                             + ", ssl: " + ssl + ")");
