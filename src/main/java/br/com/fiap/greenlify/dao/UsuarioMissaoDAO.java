@@ -573,6 +573,34 @@ public class UsuarioMissaoDAO {
     }
 
     /**
+     * Total de missões concluídas por usuário, o número exibido no ranking all time. Conta cada
+     * registro de Usuario_Missao que tem data de conclusão (dt_conclusao), de missão contínua ou
+     * mensal, uma única vez por missão. Não depende de pontuação nem de uploads: é o mesmo
+     * registro de conclusão gravado pelo sistema.
+     *
+     * @return mapa idUsuario -> total de missões concluídas (só usuários com pelo menos uma)
+     * @throws IllegalStateException se o banco falhar
+     */
+    public Map<Integer, Integer> contarMissoesConcluidasPorUsuario() {
+        String sql = "SELECT id_usuario, COUNT(*) AS total FROM Usuario_Missao "
+                + "WHERE dt_conclusao IS NOT NULL GROUP BY id_usuario";
+
+        Map<Integer, Integer> totais = new HashMap<>();
+        try (Connection con = ConnectionFactory.obterConexao();
+             PreparedStatement ps = con.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+
+            while (rs.next()) {
+                totais.put(rs.getInt("id_usuario"), rs.getInt("total"));
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            throw new IllegalStateException("Não foi possível contar as missões concluídas.", e);
+        }
+        return totais;
+    }
+
+    /**
      * Grava a data em que o usuário concluiu a missão contínua, na conexão (transação) de quem
      * chamou. Dentro do mesmo mês a primeira conclusão é a que vale; em um novo mês (novo
      * ciclo das missões contínuas) a data é atualizada para a conclusão mais recente, e não

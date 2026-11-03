@@ -43,8 +43,9 @@ public class RankingAllTimeService {
     }
 
     /**
-     * Lista o ranking all time, do usuário com mais pontos elegíveis para o com menos
-     * (empate: o cadastro mais antigo vem primeiro).
+     * Lista o ranking all time, do usuário com mais missões concluídas para o com menos
+     * ({@code totalMissoes} vem de Usuario_Missao.dt_conclusao). Empate: mais pontos elegíveis
+     * (Redis/Oracle) primeiro e, persistindo, o cadastro mais antigo.
      */
     public List<RankingAllTimeResponseDTO> listar() {
         Map<Integer, Integer> totais = redisDAO.listar();
@@ -59,6 +60,8 @@ public class RankingAllTimeService {
             }
         }
         final Map<Integer, Integer> pontos = totais;
+        // O que a tela mostra é o total de missões concluídas (Oracle); os pontos só desempatam.
+        final Map<Integer, Integer> concluidas = usuarioMissaoDAO.contarMissoesConcluidasPorUsuario();
 
         List<UsuarioComum> usuarios = usuarioDAO.listar();
         List<RankingAllTimeResponseDTO> ranking = new ArrayList<>();
@@ -67,7 +70,9 @@ public class RankingAllTimeService {
         }
 
         usuarios.sort(Comparator
-                .comparingInt((UsuarioComum u) -> pontos.getOrDefault(u.getIdUsuario(), 0)).reversed()
+                .comparingInt((UsuarioComum u) -> concluidas.getOrDefault(u.getIdUsuario(), 0)).reversed()
+                .thenComparing(Comparator
+                        .comparingInt((UsuarioComum u) -> pontos.getOrDefault(u.getIdUsuario(), 0)).reversed())
                 .thenComparingInt(UsuarioComum::getIdUsuario));
 
         int posicao = 1;
@@ -75,7 +80,7 @@ public class RankingAllTimeService {
             ranking.add(new RankingAllTimeResponseDTO(
                     posicao++,
                     UsuarioResumoMapper.toDto(usuario),
-                    pontos.getOrDefault(usuario.getIdUsuario(), 0)));
+                    concluidas.getOrDefault(usuario.getIdUsuario(), 0)));
         }
         return ranking;
     }
