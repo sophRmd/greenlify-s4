@@ -44,7 +44,7 @@ public class RankingAllTimeService {
 
     /**
      * Lista o ranking all time, do usuário com mais missões concluídas para o com menos
-     * ({@code totalMissoes} vem de Usuario_Missao.dt_conclusao). Empate: mais pontos elegíveis
+     * ({@code totalMissoes} vem de {@code contarMissoesConcluidasPorUsuario}). Empate: mais pontos elegíveis
      * (Redis/Oracle) primeiro e, persistindo, o cadastro mais antigo.
      */
     public List<RankingAllTimeResponseDTO> listar() {

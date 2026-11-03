@@ -573,17 +573,43 @@ public class UsuarioMissaoDAO {
     }
 
     /**
-     * Total de missões concluídas por usuário, o número exibido no ranking all time. Conta cada
-     * registro de Usuario_Missao que tem data de conclusão (dt_conclusao), de missão contínua ou
-     * mensal, uma única vez por missão. Não depende de pontuação nem de uploads: é o mesmo
-     * registro de conclusão gravado pelo sistema.
+     * Total de missões concluídas por usuário, o número exibido no ranking all time. Usa só dados
+     * que o sistema já grava (não depende de coluna de data de conclusão):
+     * <ul>
+     *   <li><b>contínua</b>: cada mês em que o usuário teve uploads APROVADOS em número igual ou
+     *       maior que o limite de realizações da missão conta uma conclusão; se o registro de
+     *       Usuario_Missao já mostra progresso (nr_progresso_atual) no limite, conta pelo menos uma;</li>
+     *   <li><b>mensal</b>: conta uma conclusão quando nr_progresso_atual atingiu a meta (vl_meta).</li>
+     * </ul>
      *
      * @return mapa idUsuario -> total de missões concluídas (só usuários com pelo menos uma)
      * @throws IllegalStateException se o banco falhar
      */
     public Map<Integer, Integer> contarMissoesConcluidasPorUsuario() {
-        String sql = "SELECT id_usuario, COUNT(*) AS total FROM Usuario_Missao "
-                + "WHERE dt_conclusao IS NOT NULL GROUP BY id_usuario";
+        String sql = "SELECT id_usuario, SUM(qtd) AS total FROM ("
+                // contínuas: meses com uploads aprovados no limite, ou progresso já no limite
+                + "SELECT um.id_usuario AS id_usuario, "
+                + "GREATEST(NVL(m.meses, 0), "
+                + "CASE WHEN mc.nr_limite_realizacoes > 0 "
+                + "AND um.nr_progresso_atual >= mc.nr_limite_realizacoes THEN 1 ELSE 0 END) AS qtd "
+                + "FROM Usuario_Missao um "
+                + "JOIN Missao_Continua mc ON mc.id_missao = um.id_missao "
+                + "LEFT JOIN ("
+                + "SELECT x.id_usuario, x.id_missao, COUNT(*) AS meses FROM ("
+                + "SELECT u.id_usuario, u.id_missao, TRUNC(u.dt_envio, 'MM') AS mes "
+                + "FROM Upload u JOIN Missao_Continua c ON c.id_missao = u.id_missao "
+                + "WHERE u.ds_status = 'APROVADO' AND c.nr_limite_realizacoes > 0 "
+                + "GROUP BY u.id_usuario, u.id_missao, TRUNC(u.dt_envio, 'MM'), c.nr_limite_realizacoes "
+                + "HAVING COUNT(*) >= c.nr_limite_realizacoes) x "
+                + "GROUP BY x.id_usuario, x.id_missao) m "
+                + "ON m.id_usuario = um.id_usuario AND m.id_missao = um.id_missao "
+                + "UNION ALL "
+                // mensais: progresso atingiu a meta
+                + "SELECT um.id_usuario, 1 "
+                + "FROM Usuario_Missao um "
+                + "JOIN Missao_Mensal mm ON mm.id_missao = um.id_missao "
+                + "WHERE mm.vl_meta > 0 AND um.nr_progresso_atual >= mm.vl_meta"
+                + ") GROUP BY id_usuario HAVING SUM(qtd) > 0";
 
         Map<Integer, Integer> totais = new HashMap<>();
         try (Connection con = ConnectionFactory.obterConexao();
