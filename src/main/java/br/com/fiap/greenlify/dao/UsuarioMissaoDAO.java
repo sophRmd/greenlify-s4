@@ -437,8 +437,8 @@ public class UsuarioMissaoDAO {
      * exigido aqui). É agrupado por mês porque o progresso reinicia todo mês e assim as
      * conclusões de meses anteriores continuam valendo nos rankings.
      *
-     * <p>Missões mensais não entram aqui: a conclusão mensal vale para o streak e para os
-     * registros de conclusão (dt_conclusao), não para a pontuação do ranking.</p>
+     * <p>Missões mensais não entram aqui: a conclusão mensal vale para o streak, não para a
+     * pontuação do ranking (a missão mensal não tem pontuação própria).</p>
      */
     private static final String SQL_CONCLUIDAS_CONTINUAS =
             "SELECT um.id_usuario AS id_usuario "
@@ -573,81 +573,6 @@ public class UsuarioMissaoDAO {
     }
 
     /**
-     * Total de missões concluídas por usuário, o número exibido no ranking all time. Usa só dados
-     * que o sistema já grava (não depende de coluna de data de conclusão):
-     * <ul>
-     *   <li><b>contínua</b>: cada mês em que o usuário teve uploads APROVADOS em número igual ou
-     *       maior que o limite de realizações da missão conta uma conclusão; se o registro de
-     *       Usuario_Missao já mostra progresso (nr_progresso_atual) no limite, conta pelo menos uma;</li>
-     *   <li><b>mensal</b>: conta uma conclusão quando nr_progresso_atual atingiu a meta (vl_meta).</li>
-     * </ul>
-     *
-     * @return mapa idUsuario -> total de missões concluídas (só usuários com pelo menos uma)
-     * @throws IllegalStateException se o banco falhar
-     */
-    public Map<Integer, Integer> contarMissoesConcluidasPorUsuario() {
-        String sql = "SELECT id_usuario, SUM(qtd) AS total FROM ("
-                // contínuas: meses com uploads aprovados no limite, ou progresso já no limite
-                + "SELECT um.id_usuario AS id_usuario, "
-                + "GREATEST(NVL(m.meses, 0), "
-                + "CASE WHEN mc.nr_limite_realizacoes > 0 "
-                + "AND um.nr_progresso_atual >= mc.nr_limite_realizacoes THEN 1 ELSE 0 END) AS qtd "
-                + "FROM Usuario_Missao um "
-                + "JOIN Missao_Continua mc ON mc.id_missao = um.id_missao "
-                + "LEFT JOIN ("
-                + "SELECT x.id_usuario, x.id_missao, COUNT(*) AS meses FROM ("
-                + "SELECT u.id_usuario, u.id_missao, TRUNC(u.dt_envio, 'MM') AS mes "
-                + "FROM Upload u JOIN Missao_Continua c ON c.id_missao = u.id_missao "
-                + "WHERE u.ds_status = 'APROVADO' AND c.nr_limite_realizacoes > 0 "
-                + "GROUP BY u.id_usuario, u.id_missao, TRUNC(u.dt_envio, 'MM'), c.nr_limite_realizacoes "
-                + "HAVING COUNT(*) >= c.nr_limite_realizacoes) x "
-                + "GROUP BY x.id_usuario, x.id_missao) m "
-                + "ON m.id_usuario = um.id_usuario AND m.id_missao = um.id_missao "
-                + "UNION ALL "
-                // mensais: progresso atingiu a meta
-                + "SELECT um.id_usuario, 1 "
-                + "FROM Usuario_Missao um "
-                + "JOIN Missao_Mensal mm ON mm.id_missao = um.id_missao "
-                + "WHERE mm.vl_meta > 0 AND um.nr_progresso_atual >= mm.vl_meta"
-                + ") GROUP BY id_usuario HAVING SUM(qtd) > 0";
-
-        Map<Integer, Integer> totais = new HashMap<>();
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
-
-            while (rs.next()) {
-                totais.put(rs.getInt("id_usuario"), rs.getInt("total"));
-            }
-        } catch (SQLException e) {
-            e.printStackTrace();
-            throw new IllegalStateException("Não foi possível contar as missões concluídas.", e);
-        }
-        return totais;
-    }
-
-    /**
-     * Grava a data em que o usuário concluiu a missão contínua, na conexão (transação) de quem
-     * chamou. Dentro do mesmo mês a primeira conclusão é a que vale; em um novo mês (novo
-     * ciclo das missões contínuas) a data é atualizada para a conclusão mais recente, e não
-     * fica presa à primeira de todas.
-     *
-     * @param idUsuarioMissao id do registro em Usuario_Missao
-     * @param data            dia da conclusão
-     */
-    public void registrarConclusao(Connection con, int idUsuarioMissao, LocalDate data) throws SQLException {
-        String sql = "UPDATE Usuario_Missao SET dt_conclusao = ? "
-                + "WHERE id_usuario_missao = ? AND (dt_conclusao IS NULL OR dt_conclusao < ?)";
-
-        try (PreparedStatement ps = con.prepareStatement(sql)) {
-            ps.setDate(1, Date.valueOf(data));
-            ps.setInt(2, idUsuarioMissao);
-            ps.setDate(3, Date.valueOf(UploadDAO.inicioDoCiclo(data)));   // conclusões de meses anteriores
-            ps.executeUpdate();
-        }
-    }
-
-    /**
      * Avança em um passo o progresso de uma missão mensal do usuário. Só avança: o
      * encerramento da missão é uma etapa separada ({@link #encerrarMissaoMensal}), executada
      * na mesma transação apenas quando o passo atinge a meta.
@@ -715,23 +640,15 @@ public class UsuarioMissaoDAO {
     }
 
     /**
-     * Encerra a missão mensal do usuário, na conexão (transação) de quem chamou: grava a data de
-     * conclusão (uma única vez, por isso exige dt_conclusao ainda vazia) e atualiza o streak
-     * do usuário. Não mexe em ranking: a missão mensal não pontua nele.
+     * Encerra a missão mensal do usuário, na conexão (transação) de quem chamou: atualiza o
+     * streak do usuário. Não mexe em ranking: a missão mensal não pontua nele.
      *
-     * @throws IllegalArgumentException se a missão já tinha sido encerrada
+     * <p>Não grava data de conclusão: a conclusão é o próprio progresso ter atingido a meta, e
+     * quem chama ({@link #avancarProgressoMensal}) já travou o usuário e recusou missão concluída
+     * antes de avançar, então este método só roda uma vez por missão.</p>
      */
     public void encerrarMissaoMensal(Connection con, int idUsuario, int idUsuarioMissao, LocalDate dia)
             throws SQLException {
-        try (PreparedStatement ps = con.prepareStatement(
-                "UPDATE Usuario_Missao SET dt_conclusao = ? "
-                        + "WHERE id_usuario_missao = ? AND dt_conclusao IS NULL")) {
-            ps.setDate(1, Date.valueOf(dia));
-            ps.setInt(2, idUsuarioMissao);
-            if (ps.executeUpdate() == 0) {
-                throw new IllegalArgumentException("A missão já foi concluída.");
-            }
-        }
         new StreakDAO().registrarAtividadeMensal(con, idUsuario, dia);   // única regra do streak
     }
 

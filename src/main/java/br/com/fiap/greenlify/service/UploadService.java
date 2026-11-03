@@ -154,13 +154,13 @@ public class UploadService {
         // Tudo (upload, fingerprint, frames, progresso e crédito) na mesma transação.
         UploadDAO.ResultadoEnvio resultado = uploadDAO.registrarEnvio(upload, fingerprint, frames, missao);
 
-        if (resultado.concluiu()) {
-            // Conclusão já gravada no Oracle: soma no ranking all time os mesmos pontos creditados na
-            // carteira (lidos pelo DAO da missão já travada na transação, regra única da pontuação).
-            // Se o Redis falhar, a conclusão não é desfeita; a reconciliação corrige.
+        if (resultado.pontosRanking() > 0) {
+            // Upload já gravado no Oracle: no primeiro APROVADO do mês na missão, soma no ranking all
+            // time os pontos da missão (lidos pelo DAO da missão já travada na transação, regra única
+            // da pontuação). Se o Redis falhar, o envio não é desfeito; a reconciliação corrige.
             LocalDate dia = upload.getDataEnvio() != null ? upload.getDataEnvio() : LocalDate.now();
             rankingAllTimeService.registrarMissaoConcluida(
-                    usuario.getIdUsuario(), missao.getIdMissao(), dia, resultado.pontos());
+                    usuario.getIdUsuario(), missao.getIdMissao(), dia, resultado.pontosRanking());
         }
 
         atualizarPosicoesDoMes(upload);
@@ -255,10 +255,10 @@ public class UploadService {
             resultado = uploadDAO.registrarEnvio(upload, fingerprint, frames, missao);
         }
 
-        if (resultado.concluiu()) {
+        if (resultado.pontosRanking() > 0) {
             LocalDate dia = upload.getDataEnvio() != null ? upload.getDataEnvio() : LocalDate.now();
             rankingAllTimeService.registrarMissaoConcluida(
-                    usuario.getIdUsuario(), missao.getIdMissao(), dia, resultado.pontos());
+                    usuario.getIdUsuario(), missao.getIdMissao(), dia, resultado.pontosRanking());
         }
         atualizarPosicoesDoMes(upload);
         return UploadMapper.toDto(upload);

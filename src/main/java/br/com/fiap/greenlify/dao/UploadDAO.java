@@ -258,16 +258,21 @@ public class UploadDAO {
     }
 
     /**
-     * Resultado de {@link #registrarEnvio}: se o envio concluiu a missão no mês e quantos pontos foram
-     * creditados na carteira (os mesmos usados no ranking all time, lidos da missão já travada).
+     * Resultado de {@link #registrarEnvio}: se o envio atingiu o limite da missão no mês e quantos pontos
+     * foram creditados na carteira, e quantos pontos o envio soma no ranking all time.
+     *
+     * <p>No ranking all time cada mês com pelo menos um upload APROVADO da missão vale uma vez os pontos
+     * dela (mesma regra de {@code UsuarioMissaoDAO.somarPontosElegiveisPorUsuario}); por isso
+     * {@code pontosRanking} é maior que zero já no primeiro aprovado do mês, e não só ao atingir o
+     * limite (que é o que credita a carteira).</p>
      */
-    public record ResultadoEnvio(boolean concluiu, int pontos) {
+    public record ResultadoEnvio(boolean concluiu, int pontos, int pontosRanking) {
     }
 
     /**
      * Grava o envio inteiro em UMA transação, com uma única conexão: upload, fingerprint,
      * frames, progresso do usuário na missão e, se o envio conclui a missão, o crédito dos
-     * pontos na carteira e a data de conclusão. Se qualquer etapa falhar, nada é gravado.
+     * pontos na carteira. Se qualquer etapa falhar, nada é gravado.
      * <p>
      * Primeiro trava a linha do usuário e a da missão (FOR UPDATE) e só então confere o limite
      * do mês: dois envios simultâneos do mesmo usuário ficam em fila, e o segundo enxerga o
@@ -364,12 +369,17 @@ public class UploadDAO {
                     // pontos pela regra única (Pontuacao.pontosElegiveis), não por conta própria
                     pontos = regras.pontosElegiveis(upload.getStatus(), progresso);
                     new CarteiraDAO().creditarPontos(con, idUsuario, pontos);
-                    usuarioMissaoDAO.registrarConclusao(con, andamento.getIdUsuarioMissao(), dia);
                 }
+
+                // Ranking all time: o primeiro APROVADO do mês na missão vale os pontos da missão (uma vez
+                // por mês). Os pontos vêm da mesma regra única, tratando o mês como concluído.
+                int pontosRanking = aprovado && aprovadosNoCiclo == 0
+                        ? regras.pontosElegiveis(upload.getStatus(), regras.limite())
+                        : 0;
 
                 con.commit();
                 confirmado = true;
-                return new ResultadoEnvio(concluiu, pontos);
+                return new ResultadoEnvio(concluiu, pontos, pontosRanking);
             } finally {
                 // Desfaz antes de devolver a conexão: no Oracle, ligar o autocommit com a
                 // transação aberta confirmaria tudo.

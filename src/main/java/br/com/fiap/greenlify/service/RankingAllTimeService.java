@@ -17,9 +17,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Ranking all time: cada usuário vale a pontuação elegível das missões contínuas que concluiu
- * (regra única de {@code Pontuacao.pontosElegiveis}; missão mensal não soma). Não depende da
- * carteira, então pagar uma conta não faz ninguém cair.
+ * Ranking all time: cada usuário vale a soma dos pontos de todas as missões que concluiu. Cada mês
+ * com pelo menos um upload APROVADO de uma missão contínua vale uma vez os pontos dela (regra única
+ * de {@code Pontuacao.pontosElegiveis}). A missão mensal não tem pontuação, então não soma. Não
+ * depende da carteira, então pagar uma conta não faz ninguém cair.
  *
  * <p>O Oracle é a fonte da verdade e o Redis (Sorted Set {@value RankingRedisDAO#CHAVE}) é só uma
  * projeção rápida dela: o Redis responde a consulta; se estiver fora do ar ou vazio, o Oracle
@@ -43,9 +44,8 @@ public class RankingAllTimeService {
     }
 
     /**
-     * Lista o ranking all time, do usuário com mais missões concluídas para o com menos
-     * ({@code totalMissoes} vem de {@code contarMissoesConcluidasPorUsuario}). Empate: mais pontos elegíveis
-     * (Redis/Oracle) primeiro e, persistindo, o cadastro mais antigo.
+     * Lista o ranking all time, do usuário com mais pontos elegíveis para o com menos
+     * (empate: o cadastro mais antigo vem primeiro).
      */
     public List<RankingAllTimeResponseDTO> listar() {
         Map<Integer, Integer> totais = redisDAO.listar();
@@ -60,8 +60,6 @@ public class RankingAllTimeService {
             }
         }
         final Map<Integer, Integer> pontos = totais;
-        // O que a tela mostra é o total de missões concluídas (Oracle); os pontos só desempatam.
-        final Map<Integer, Integer> concluidas = usuarioMissaoDAO.contarMissoesConcluidasPorUsuario();
 
         List<UsuarioComum> usuarios = usuarioDAO.listar();
         List<RankingAllTimeResponseDTO> ranking = new ArrayList<>();
@@ -70,9 +68,7 @@ public class RankingAllTimeService {
         }
 
         usuarios.sort(Comparator
-                .comparingInt((UsuarioComum u) -> concluidas.getOrDefault(u.getIdUsuario(), 0)).reversed()
-                .thenComparing(Comparator
-                        .comparingInt((UsuarioComum u) -> pontos.getOrDefault(u.getIdUsuario(), 0)).reversed())
+                .comparingInt((UsuarioComum u) -> pontos.getOrDefault(u.getIdUsuario(), 0)).reversed()
                 .thenComparingInt(UsuarioComum::getIdUsuario));
 
         int posicao = 1;
@@ -80,7 +76,7 @@ public class RankingAllTimeService {
             ranking.add(new RankingAllTimeResponseDTO(
                     posicao++,
                     UsuarioResumoMapper.toDto(usuario),
-                    concluidas.getOrDefault(usuario.getIdUsuario(), 0)));
+                    pontos.getOrDefault(usuario.getIdUsuario(), 0)));
         }
         return ranking;
     }
